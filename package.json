@@ -10,10 +10,21 @@
   },
   "scripts": {
     "start": "node src/main.js",
-    "test": "mocha"
+    "test": "mocha",
+    "build": "mkdir -p ./build && pkg package.json --out-path ./build"
+  },
+  "bin": "./src/main.js",
+  "pkg": {
+    "scripts": [ 
+      "mymonero-ws-client/mymonero-core-js/monero_utils/MyMoneroCoreCpp_WASM.js"
+    ],
+    "assets": [
+      "mymonero-ws-client/mymonero-core-js/monero_utils/MyMoneroCoreCpp_WASM.wasm"
+    ]
   },
   "author": "MyMonero",
   "devDependencies": {
+    "axios": "^0.19.1",
     "mocha": "5.2.0"
   }
 }

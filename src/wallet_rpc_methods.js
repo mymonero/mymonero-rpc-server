@@ -81,10 +81,11 @@ module.exports =
             //
             //
             console.log("newly_created_wallet", created)
+            // create the Wallet object with 'created' here, save it to the db, and set the instance as the 'open' one
             // TODO: save this newly created wallet in the sqlite db for wallets 
 
 
-            server._write_success({/*intentionally blank*/}, res)
+            server._write_success({/*intentionally empty*/}, res)
         })
     }
 }
