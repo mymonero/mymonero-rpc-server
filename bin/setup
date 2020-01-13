@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+
+echo "🔁  npm install";
+npm install
+echo "🔁  bin/update_submodules";
+update_submodules
