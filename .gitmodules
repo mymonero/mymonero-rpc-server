@@ -1,0 +1,3 @@
+[submodule "mymonero-ws-client"]
+	path = mymonero-ws-client
+	url = git@github.com:mymonero/mymonero-ws-client.git

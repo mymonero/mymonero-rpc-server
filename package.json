@@ -1,0 +1,19 @@
+{
+  "name": "mymonero-rpc-server",
+  "version": "1.0.0",
+  "description": "",
+  "main": "./src/main.js",
+  "license": "SEE LICENSE IN LICENSE.txt",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mymonero/mymonero-rpc-server.git"
+  },
+  "scripts": {
+    "start": "node src/main.js",
+    "test": "mocha"
+  },
+  "author": "MyMonero",
+  "devDependencies": {
+    "mocha": "5.2.0"
+  }
+}
