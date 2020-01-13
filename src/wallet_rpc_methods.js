@@ -26,6 +26,41 @@
 // STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //
+const mymonero_core = require('../mymonero-ws-client/mymonero-core-js')
+//
+const nettype = mymonero_core.nettype_utils.network_type.MAINNET // TODO: pass via server options or method function args
+//
+function mnemonic_language_to_code(language)
+{
+    switch (language) {
+        case "English":
+            return "en"
+        case "Deutsch":
+            return "de"
+        case "Español":
+            return "es"
+        case "Français":
+            return "fr"
+        case "Italiano":
+            return "it"
+        case "Nederlands":
+            return "nl"
+        case "Português":
+            return "pt"
+        case "日本語":
+            return "ja"
+        case "русский язык":
+            return "ru"
+        case "简体中文 (中国)":
+            return "zh"
+        case "Esperanto":
+            return "eo"
+        case "Lojban":
+            return "jbo"
+        default:
+            throw "Unrecognized language"
+    }
+}
 //
 module.exports =
 {
@@ -33,7 +68,23 @@ module.exports =
     {
         // params.filename
         // params.password
-        // params.language
-        server._write_success({ "TODO":"soon" }, res)
+        const filename = params.filename
+        const password = params.password
+        const lang_code = mnemonic_language_to_code(params.language)
+        mymonero_core.monero_utils_promise.then(function(monero_utils) {
+            try {
+                var created = monero_utils.newly_created_wallet(lang_code, nettype);
+            } catch (e) {
+                server._write_error(500, e, res)
+                console.log(e)
+            }
+            //
+            //
+            console.log("newly_created_wallet", created)
+            // TODO: save this newly created wallet in the sqlite db for wallets 
+
+
+            server._write_success({/*intentionally blank*/}, res)
+        })
     }
 }
