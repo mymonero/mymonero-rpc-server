@@ -52,7 +52,7 @@ describe("RPC client tests - Wallet RPC - basic wallet functions", function()
 		var payload = {
 			jsonrpc: "2.0", id: "0",
 			method: "create_wallet", params: {
-				filename: filename0,
+				filename: filename0+"-"+(new Date()).getTime(),
 				password: password0,
 				language: wallet_language
 			}

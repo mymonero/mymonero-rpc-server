@@ -6,4 +6,4 @@ coverage
 package-lock.json
 
 build
-mytestwallet.json
+mytestwallet*.json
