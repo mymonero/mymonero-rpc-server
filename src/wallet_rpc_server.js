@@ -59,7 +59,15 @@ class WalletRPCServer extends ServerBase
             self._write_error(400, "Unrecognized .method", res)
             return
         }
-        methods[method_name](optl__params, self, res) // callers can access self.DocumentStore()
+        methods[method_name](
+            optl__params, self /*callers can access self.DocumentStore()*/, res
+        ).then(function(r) {
+            if (typeof r !== 'undefined') {
+                throw "Not expecting a return value here"
+            }
+        }).catch(function(e) {
+            console.error("Error in wallet_rpc_server method " + method_name + " call:", e)
+        })
     }
 }
 module.exports = WalletRPCServer
