@@ -126,8 +126,7 @@ async function _open_wallet(store, filename, password)
         wallet_store: store, // hanging onto this here ... unclear if there's a better way than factoring much of this into a wallet class and passing the store to the wallet itself
         doc: doc
     }
-    console.log("TODO: remainder of _open_wallet… open WS conn and start filling in : ", filename, doc)
-    __givenOpenWallet_open_ws(
+    let r = await __givenOpenWallet_open_ws(
         // These can be stored for the purpose of later getting only the latest history from the ws
         doc.last_confirmed_tx_id,
         doc.last_block_hash
@@ -136,14 +135,47 @@ async function _open_wallet(store, filename, password)
     return doc
 }
 //
+const fetch = require('node-fetch')
+const _urlBase_REST = "https://api.mymonero.com:8443"
+function __REST_body_base(address, view_key)
+{
+    return {
+        // app_name: "Wallet RPC",
+        // app_version: 123,
+        address: address, 
+        view_key: view_key,
+    }
+}
+async function __REST_fetch_POST(path, body)
+{
+    return await fetch(`${_urlBase_REST}${path}`, {
+        method: 'POST', 
+        body: JSON.stringify(body),
+        headers: { 'Content-Type': 'application/json' }
+    })
+}
+async function _REST_login(address, view_key)
+{
+    const body = __REST_body_base(address, view_key)
+    body.create_account = true
+    //
+    let res = await __REST_fetch_POST("/login", body)
+    let json = await res.json()
+    console.log("/login Got JSON: ", json) 
+    //
+    // TODO: extract shard ID from this
+    //
+    return json
+}
+//
 //
 const ws_wireformat = require('../mymonero-ws-client/ws/ws_wireformat')
 const WSErrorCode = ws_wireformat.WSErrorCode
+const WSTransport = require("../mymonero-ws-client/ws/ws_transport.real")
+const WSClient = require('../mymonero-ws-client/ws/ws_client')
+
 //
-const ws_transport = new (require("../mymonero-ws-client/ws/ws_transport.real"))({
-	ws_url_base: "ws://localhost:8888" /* 8888 is real, 8889 is debug */ // 'ws://api.mymonero.com:8091' // also the default for ws_transport.real.js
-})
-function __givenOpenWallet_open_ws(
+async function __givenOpenWallet_open_ws(
     optl_persisted__last_confirmed_tx_id,
     optl_persisted__last_block_hash
 ) {
@@ -151,9 +183,33 @@ function __givenOpenWallet_open_ws(
         throw "Expected non-null opened_wallet_struct in __open_ws"
     }
 
-    console.log("__givenOpenWallet_open_ws("+ optl_persisted__last_confirmed_tx_id+", "+ optl_persisted__last_block_hash)
+    // TODO: obtain last_confirmed_tx_id and last_block_hash from client on appropriate events and call __save_wallet_after_delay_unless_canceled
+    // console.log("__givenOpenWallet_open_ws("+ optl_persisted__last_confirmed_tx_id+", "+ optl_persisted__last_block_hash)
 
-    const ws_client = new (require('../mymonero-ws-client/ws/ws_client'))({
+
+    let login_res_json
+    try {
+        login_res_json = await _REST_login(
+            opened_wallet_struct.doc.address, 
+            opened_wallet_struct.doc.view_key
+        )
+    } catch (e) {
+        console.error("/login error", e)
+        _close_wallet() // closing, first
+        throw e // but also throwing so the error can be sent back to the client
+        return
+    }
+    //
+    const new_address = login_res_json.new_address
+    const start_height = login_res_json.start_height // TODO: save this locally?
+    //
+    const ws_url_base = "ws://localhost:8888" /* 8888 is real, 8889 is debug */ // 'ws://api.mymonero.com:8091' // also the default for ws_transport.real.js
+    //
+    // TODO: lazy create ws_transport by shard cookie sent back in login_res_json:
+    const ws_transport = new WSTransport({
+        ws_url_base: ws_url_base
+    })
+    const ws_client = new WSClient({
         ws_transport: ws_transport,
         optl_persisted__last_confirmed_tx_id: optl_persisted__last_confirmed_tx_id,
         optl_persisted__last_block_hash: optl_persisted__last_block_hash,
@@ -169,6 +225,9 @@ function __givenOpenWallet_open_ws(
         subscr_initial_backlog_txs_cb: function(feed_id, optl__req_id, tx)
         {
             // assert.notEqual(lastReceived_block_height, null);
+
+            //
+            // TODO: add tx to the list of txs ... unless it exists .. and maybe add it to a map for fast lookup? ... and call save
             
         },
         subscr_initial_error_cb: function(feed_id, req_id, err_code, err_msg)
@@ -193,6 +252,9 @@ function __givenOpenWallet_open_ws(
         },
         postinitial_tx_cb: function(feed_id, tx)
         {
+
+            // TODO: add tx to the list of txs ... unless it exists .. and maybe add it to a map for fast lookup? .. and call save
+
         },
         anonymous_error_cb: function(feed_id, err_code, err_msg)
         {
@@ -208,10 +270,15 @@ function __givenOpenWallet_open_ws(
         },
         confirm_tx_cb: function(feed_id, tx_id, tx_hash, tx_height)
         {
+
+            // TODO: confirm tx which ought to be within the existing store of txs  and call save
+
         },
         optl__store_did_forget_txs_cb: function(tx_ids)
         {
-            console.log("[wallet/optl__store_did_forget_txs_cb] with ids", tx_ids)
+
+            // TODO: drop txs with those ids from the list and call save
+
         }
     })
     opened_wallet_struct.ws_client = ws_client // storing the ws_client to close/free it later
@@ -223,7 +290,7 @@ function __givenOpenWallet_open_ws(
             // Now that ws is open, we can subscribe for that wallet
             // (but first check if it's the same one
             if (!opened_wallet_struct || was_connecting_for_wallet_w_addr !== opened_wallet_struct__address()) {
-                console.log("Opened a WS conn but bailing before opening subscr because either wallet was closed or different wallet was opened")
+                console.warn("Opened a WS conn but bailing before opening subscr because either wallet was closed or different wallet was opened")
             } // ^-- note: this doesn't preclude a duplicate subscription being done for the same wallet on a fast close-then-open but the ws teardown on a close_wallet should handle that possibility wanyway
             //
             const payload = ws_client.new_subscribe_payload({
@@ -236,7 +303,12 @@ function __givenOpenWallet_open_ws(
         },
         function(err)
         { // ws_error_cb
-            console.error("An error in the client's connection ... maybe close the wallet ?")
+            console.error("Error on ws_client.connect: '"+err+"'. Closing wallet.")
+            _close_wallet()
+            //
+            if (err == null) {
+                console.warn("Expected error not to be null")
+            }
         }
     )
     opened_wallet_struct.ws_feed_id = ws_feed_id
@@ -256,7 +328,6 @@ async function _close_wallet()
     opened_wallet_struct.ws_client = null // not strictly necessary to do this
     opened_wallet_struct = null // free/release
 }
-//
 //
 //
 module.exports =
