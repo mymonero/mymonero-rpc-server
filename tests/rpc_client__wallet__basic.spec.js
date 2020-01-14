@@ -45,35 +45,30 @@ const rpc_server_url = 'http://localhost:18082/json'
 var first__done_fn = null;
 describe("RPC client tests - Wallet RPC - basic wallet functions", function()
 {
-	it("can create", function(done) {
+	it("can create_wallet", function(done)
+	{
 		this.timeout(60 * 1000);
-
-		var done_called = false
-
-
-		// assert.notEqual(null, ws_feed_id)
-		var payload =
-		{
-			jsonrpc: "2.0",
-			id: "0",
-			method: "create_wallet",
-			params: {
+		//
+		var payload = {
+			jsonrpc: "2.0", id: "0",
+			method: "create_wallet", params: {
 				filename: filename0,
 				password: password0,
 				language: wallet_language
 			}
 		}
 		const req = axios.post(rpc_server_url, payload)
-		req.then(function(res, two)
-		{
-			const res_data = res.data
-			console.log("Got res data" , res_data)
-			assert.equal(done_called, false)
-			done_called = true
+		req.then(function(res) {
+			console.log("Got res data" , res.data)
 			done();
+		}).catch(function(e) {
+			assert.fail(e.response.data);
 		})
-
 	});
+	//
+	//
+	//
+
 });
 
 

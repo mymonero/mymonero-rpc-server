@@ -37,7 +37,18 @@ class WalletRPCServer extends ServerBase
         options.port = options.port || 18082
         options.server_name = options.server_name || "Monero Wallet RPC server"
         //
+        if (typeof options.document_store == 'undefined' || !options.document_store) {
+            throw "WalletRPCServer requires options.document_store"
+        }
         super(options)
+        //
+        this.document_store = options.document_store // store for runtime access
+    }
+    //
+    // Accessors
+    DocumentStore()
+    { // made an accessor for this to standardize the store's availability
+        return this.document_store
     }
     //
     // Internal - Delegation
@@ -48,7 +59,7 @@ class WalletRPCServer extends ServerBase
             self._write_error(400, "Unrecognized .method", res)
             return
         }
-        methods[method_name](optl__params, self, res)
+        methods[method_name](optl__params, self, res) // callers can access self.DocumentStore()
     }
 }
 module.exports = WalletRPCServer

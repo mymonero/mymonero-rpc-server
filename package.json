@@ -15,7 +15,7 @@
   },
   "bin": "./src/main.js",
   "pkg": {
-    "scripts": [ 
+    "scripts": [
       "mymonero-ws-client/mymonero-core-js/monero_utils/MyMoneroCoreCpp_WASM.js"
     ],
     "assets": [
@@ -26,5 +26,8 @@
   "devDependencies": {
     "axios": "^0.19.1",
     "mocha": "5.2.0"
+  },
+  "dependencies": {
+    "sqlite3": "^4.1.1"
   }
 }

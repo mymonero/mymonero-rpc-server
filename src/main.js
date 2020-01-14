@@ -26,9 +26,18 @@
 // STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //
-const WalletRPCServer = require('./wallet_rpc_server')
-const wallet_rpc_server = new WalletRPCServer({})
+const path = require('path')
+//
+const document_store = new (require('./document_store.files'))({
+	userDataAbsoluteFilepath: path.resolve("."),
+	fs: require('fs')
+})
+//
+const wallet_rpc_server = new (require('./wallet_rpc_server'))({
+    document_store: document_store
+})
 wallet_rpc_server.start()
 //
-// TODO: daemon/block rpc server instance
+// TODO: daemon (block info) rpc server instance
+//
 //
