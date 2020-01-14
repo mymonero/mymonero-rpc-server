@@ -134,7 +134,12 @@ module.exports =
         if (!password) {
             return server._write_error(400, ".password required", res)
         }
-        const lang_code = mnemonic_language_to_code(params.language)
+        let lang_code
+        try {
+            lang_code = mnemonic_language_to_code(params.language)
+        } catch (e) {
+            return server._write_error(400, "Unknown language", res)
+        }
         try {
             var created = (await mymonero_core.monero_utils_promise).newly_created_wallet(lang_code, nettype);
         } catch (e) {
