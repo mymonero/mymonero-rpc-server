@@ -53,9 +53,9 @@ class Server
                 self._write_error(400, "Expected POST", res) // TODO: what does RPC server do?
                 return
             }
-            __gather_RPC_POST(req, res, function(method_name, params)
+            __gather_RPC_POST(req, res, function(optl__rpc_req_id, method_name, params)
             {
-                self._overridable_didReceiveReq(method_name, params, res)
+                self._overridable_didReceiveReq(optl__rpc_req_id, method_name, params, res)
             })
         }
         function __gather_RPC_POST(req, res__forExc, success_fn) // not specifically necessary to factor this, but useful for clarity
@@ -73,13 +73,14 @@ class Server
                     self._write_error(400, "Unable to parse JSON POST body", res__forExc) // TODO: what does RPC server do?
                     return
                 }
+                const optl__rpc_req_id = req_body.id
                 const method_name = req_body.method
                 const params = req_body.params
                 if (typeof method_name !== 'string' || !method_name.length) {
                     self._write_error(400, "Expected string body .method", res__forExc) // TODO: what does RPC server do?
                     return
                 }
-                success_fn(method_name, params)
+                success_fn(optl__rpc_req_id, method_name, params)
             })
         }
         http.createServer(_server_handler_fn).listen(this.port)
@@ -89,22 +90,25 @@ class Server
     _write_error(code, msg, res)
     {
         res.writeHead(code, { 'Content-Type': 'text/plain' })
-        res.write(msg)
+        res.write(msg) // TODO: does this need to be { jsonrpc, id, … }?
         res.end()
     }
-    _write_success(body, res)
+    _write_success(rpc_req_id, result, res)
     {
         res.writeHead(200, { 'Content-Type': 'text/plain' })
-        res.write(JSON.stringify(body)) 
+        res.write(JSON.stringify({
+            jsonrpc: "2.0",
+            id: rpc_req_id,
+            result: result
+        }))
         res.end()
     }
     //
     // Internal - Delegation
-    _overridable_didReceiveReq(method_name, optl__params, res)
+    _overridable_didReceiveReq(optl__rpc_req_id, method_name, optl__params, res)
     { // see e.g. wallet_rpc_server.js
-        res.writeHead(500, {'Content-Type': 'text/plain'})
-        res.write("Do not instantiate rpc_server_base directly but extend and implement _overridable_didReceiveReq") // TODO: what does RPC server do?
-        res.end()
+        const self = this
+        self._write_error(500, "Do not instantiate rpc_server_base directly but extend and implement _overridable_didReceiveReq", res) // TODO: what does RPC server do?
     }
 }
 module.exports = Server

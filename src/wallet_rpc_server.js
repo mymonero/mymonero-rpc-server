@@ -52,7 +52,7 @@ class WalletRPCServer extends ServerBase
     }
     //
     // Internal - Delegation
-    _overridable_didReceiveReq(method_name, optl__params, res)
+    _overridable_didReceiveReq(optl__rpc_req_id, method_name, optl__params, res)
     {
         const self = this
         if (supported_method_names.indexOf(method_name) == -1) {
@@ -60,7 +60,7 @@ class WalletRPCServer extends ServerBase
             return
         }
         methods[method_name](
-            optl__params, self /*callers can access self.DocumentStore()*/, res
+            optl__rpc_req_id || "0", optl__params, self /*callers can access self.DocumentStore()*/, res
         ).then(function(r) {
             if (typeof r !== 'undefined') {
                 throw "Not expecting a return value here"

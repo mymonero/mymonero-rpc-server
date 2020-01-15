@@ -92,9 +92,14 @@ async function _store_wallet_with(
     await _write_wallet_json_for_file_named(store, filename, password, plain_doc)
 }
 var __wallet_timeout_til_save = null
-async function _write_opened_wallet()
+async function __givenOpenWallet_write()
 {
-    await _write_wallet_json_for_file_named(store, filename, password, plain_doc)
+    await _write_wallet_json_for_file_named(
+        opened_wallet_struct.wallet_store, 
+        opened_wallet_struct.filename, 
+        opened_wallet_struct.password, 
+        opened_wallet_struct.doc
+    )
 }
 function __save_wallet_after_delay_unless_canceled()
 {
@@ -103,7 +108,11 @@ function __save_wallet_after_delay_unless_canceled()
     }
     __wallet_timeout_til_save = setTimeout(function()
     {
-        _write_opened_wallet()
+        if (opened_wallet_struct == null) {
+            console.warn("__save_wallet_after_delay_unless_canceled timeout called but no wallet currently open. Not calling _write_….")
+            return 
+        }
+        __givenOpenWallet_write()
     }, 50) // if no subsequent updates T ms, save
 }
 //
@@ -194,7 +203,7 @@ async function __givenOpenWallet_open_ws(
             opened_wallet_struct.doc.view_key
         )
     } catch (e) {
-        console.error("/login error", e)
+        console.error("/login error ('" + e + "') … closing wallet.")
         _close_wallet() // closing, first
         throw e // but also throwing so the error can be sent back to the client
         return
@@ -332,7 +341,7 @@ async function _close_wallet()
 //
 module.exports =
 {
-    create_wallet: async function(params, server, res)
+    create_wallet: async function(rpc_req_id, params, server, res)
     {
         if (opened_wallet_struct != null) {
             return server._write_error(400, "A wallet is already open - send close_wallet first", res)
@@ -384,8 +393,23 @@ module.exports =
             await _open_wallet(server.DocumentStore(), filename, password) // this'll cause a login to occur via a WS conn open + subscr 
         } catch (e) {
             console.error(e)
-            return server._write_error(500, "Error opening created & saved wallet", res)
+            return server._write_error(500, "Internal error opening created & saved wallet", res)
         }
-        server._write_success({/*intentionally empty*/}, res)
+        server._write_success(rpc_req_id, {/*intentionally empty*/}, res)
+    },
+    close_wallet: async function(rpc_req_id, params, server, res)
+    {
+        if (opened_wallet_struct == null) {
+            return server._write_error(400, "No wallet is currently open", res)
+        }
+        try {
+            await __givenOpenWallet_write()
+        } catch (e) {
+            console.error(e)
+            server._write_error(400, "Error writing open wallet", res)
+            return // without closing wallet -- because maybe memory inspection is desired before process killed .. or it's a once-off and close_wallet will be sent again
+        }
+        _close_wallet()
+        server._write_success(rpc_req_id, {}, res)
     }
 }

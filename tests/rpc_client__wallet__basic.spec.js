@@ -41,30 +41,54 @@ const sk1 = "4e6d43cd03812b803c6f3206689f5fcc910005fc7e91d50d79b0776dbefcd803"
 const seedwords1 = "foxes selfish humid nexus juvenile dodge pepper ember biscuit elapse jazz vibrate biscuit"
 //
 const rpc_server_url = 'http://localhost:18082/json'
+async function _send_RPC_message__orFail(rpc_req_id, method, params)
+{
+	var payload = 
+	{
+		jsonrpc: "2.0", id: rpc_req_id,
+		method: method, params: params
+	}
+	let res
+	try {
+		res = await axios.post(rpc_server_url, payload)
+	} catch (e) {
+		console.log("Error response from POST: ")
+		assert.fail(e.response.data);
+	}
+	console.log("Got res data" , res.data)
+
+	return res.data
+}
 //
 var first__done_fn = null;
 describe("RPC client tests - Wallet RPC - basic wallet functions", function()
 {
-	it("can create_wallet", function(done)
+	it("can create_wallet", async function(done)
 	{
 		this.timeout(60 * 1000);
 		//
-		var payload = {
-			jsonrpc: "2.0", id: "0",
-			method: "create_wallet", params: {
-				filename: filename0+"-"+(new Date()).getTime(),
-				password: password0,
-				language: wallet_language
-			}
+		let rpc_req_id = "t1"
+		let method = "create_wallet"
+		let params = {
+			filename: filename0+"-"+(new Date()).getTime(),
+			password: password0,
+			language: wallet_language
 		}
-		const req = axios.post(rpc_server_url, payload)
-		req.then(function(res) {
-			console.log("Got res data" , res.data)
-			done();
-		}).catch(function(e) {
-			assert.fail(e.response.data);
-		})
+		let res_data = await _send_RPC_message__orFail(rpc_req_id, method, params)
+		assert.equal(res_data.id, rpc_req_id)
+		done();
 	});
+	it("can close created wallet", async function(done)
+	{
+		this.timeout(60 * 1000);
+		//
+		let rpc_req_id = "t2"
+		let method = "close_wallet"
+		let params = {}
+		let res_data = await _send_RPC_message__orFail(rpc_req_id, method, params)
+		assert.equal(res_data.id, rpc_req_id)
+		done();
+	})
 	//
 	//
 	//
