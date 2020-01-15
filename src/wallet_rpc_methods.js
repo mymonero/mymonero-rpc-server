@@ -290,6 +290,10 @@ async function __givenOpenWallet_open_ws(
 
         }
     })
+    if (opened_wallet_struct == null) {
+        console.log("Wallet was already closed before ws_client.connect() called")
+        return
+    }
     opened_wallet_struct.ws_client = ws_client // storing the ws_client to close/free it later
     const was_connecting_for_wallet_w_addr = opened_wallet_struct.doc.address
     // ^- we can use this to check if the opened_wallet_struct at any future async point is still the same as the one we opened for in this scope
@@ -320,22 +324,35 @@ async function __givenOpenWallet_open_ws(
             }
         }
     )
+    if (opened_wallet_struct == null) {
+        console.log("Wallet was already closed before setting .ws_feed_id")
+        return
+    }
     opened_wallet_struct.ws_feed_id = ws_feed_id
 }
+let __is_closing_wallet = false
 async function _close_wallet()
 {
     if (opened_wallet_struct == null) {
         throw new Error("No wallet currently open")
     }
-    if (opened_wallet_struct.ws_client) {
-        if (opened_wallet_struct.ws_feed_id) { // close any open WS conns for that wallet
-            opened_wallet_struct.ws_client.disconnect_feed(opened_wallet_struct.ws_feed_id)
-        } else {
-            console.warn("_close_wallet: non-nil ws_client but nil ws_feed_id")
-        }
+    if (__is_closing_wallet) {
+        console.log("Something called by _close_wallet is triggering a _close_wallet()… skipping…")
+        return
     }
-    opened_wallet_struct.ws_client = null // not strictly necessary to do this
-    opened_wallet_struct = null // free/release
+    __is_closing_wallet = true
+    {
+        if (opened_wallet_struct.ws_client) {
+            if (opened_wallet_struct.ws_feed_id) { // close any open WS conns for that wallet
+                opened_wallet_struct.ws_client.disconnect_feed(opened_wallet_struct.ws_feed_id)
+            } else {
+                console.warn("_close_wallet: non-nil ws_client but nil ws_feed_id")
+            }
+        }
+        opened_wallet_struct.ws_client = null // not strictly necessary to do this
+        opened_wallet_struct = null // free/release
+    }
+    __is_closing_wallet = false
 }
 //
 //
@@ -411,5 +428,26 @@ module.exports =
         }
         _close_wallet()
         server._write_success(rpc_req_id, {}, res)
+    },
+    open_wallet: async function(rpc_req_id, params, server, res)
+    {
+        if (opened_wallet_struct != null) {
+            return server._write_error(400, "A wallet is already open - send close_wallet first", res)
+        }
+        const filename = params.filename
+        if (!filename) {
+            return server._write_error(400, ".filename required", res)
+        }
+        const password = params.password
+        if (!password) {
+            return server._write_error(400, ".password required", res)
+        }
+        try {
+            await _open_wallet(server.DocumentStore(), filename, password) // this'll cause a login to occur via a WS conn open + subscr 
+        } catch (e) {
+            console.error(e)
+            return server._write_error(500, "Internal error opening wallet", res)
+        }
+        server._write_success(rpc_req_id, {/*intentionally empty*/}, res)
     }
 }

@@ -59,6 +59,7 @@ class WalletRPCServer extends ServerBase
             self._write_error(400, "Unrecognized .method", res)
             return
         }
+        console.log("[wallet_rpc_server/"+method_name+"]")
         methods[method_name](
             optl__rpc_req_id || "0", optl__params, self /*callers can access self.DocumentStore()*/, res
         ).then(function(r) {
