@@ -60,11 +60,26 @@ function mnemonic_language_to_code(language)
     }
 }
 //
-const cryptor = require('./symmetric_string_cryptor')  
-async function _read_wallet_json_for_file_named(store, filename, password)
+const cryptor = require('./symmetric_string_cryptor')
+async function _contents_of_file_named(store, filename)
 {
     let raw_str = await store.read_stringInFileNamed(filename)
-    if (typeof raw_str === 'undefined' || !raw_str) {
+    if (typeof raw_str == 'undefined') {
+        return raw_str
+    }
+    return raw_str
+}
+async function _does_file_exist_named(store, filename) {
+    let raw_str = await _contents_of_file_named(store, filename)
+    if (raw_str) {
+        return true
+    }
+    return false
+}
+async function _read_wallet_json_for_file_named(store, filename, password)
+{
+    let raw_str = await _contents_of_file_named(store, filename)
+    if (!raw_str) {
         return null // wallet does not exist on disk yet
     }
     let plain_str = await cryptor.New_DecryptedString__Promise(raw_str, password)
@@ -94,25 +109,25 @@ async function _store_wallet_with(
 var __wallet_timeout_til_save = null
 async function __givenOpenWallet_write()
 {
-    await _write_wallet_json_for_file_named(
+    return await _write_wallet_json_for_file_named(
         opened_wallet_struct.wallet_store, 
         opened_wallet_struct.filename, 
         opened_wallet_struct.password, 
         opened_wallet_struct.doc
     )
 }
-function __save_wallet_after_delay_unless_canceled()
+async function __save_wallet_after_delay_unless_canceled()
 {
     if (__wallet_timeout_til_save) {
         clearTimeout(__wallet_timeout_til_save)
     }
-    __wallet_timeout_til_save = setTimeout(function()
+    __wallet_timeout_til_save = setTimeout(async function()
     {
         if (opened_wallet_struct == null) {
             console.warn("__save_wallet_after_delay_unless_canceled timeout called but no wallet currently open. Not calling _write_….")
             return 
         }
-        __givenOpenWallet_write()
+        await __givenOpenWallet_write()
     }, 50) // if no subsequent updates T ms, save
 }
 //
@@ -125,6 +140,10 @@ function opened_wallet_struct__address()
 function opened_wallet_struct__view_key()
 {
     return opened_wallet_struct.doc.view_key
+}
+function opened_wallet_struct__seed()
+{
+    return opened_wallet_struct.doc.mnemonic
 }
 async function _open_wallet(store, filename, password)
 {
@@ -192,7 +211,7 @@ async function __givenOpenWallet_open_ws(
         throw "Expected non-null opened_wallet_struct in __open_ws"
     }
 
-    // TODO: obtain last_confirmed_tx_id and last_block_hash from client on appropriate events and call __save_wallet_after_delay_unless_canceled
+    // TODO: obtain last_confirmed_tx_id and last_block_hash from ws_client's store on appropriate events and call __save_wallet_after_delay_unless_canceled
     // console.log("__givenOpenWallet_open_ws("+ optl_persisted__last_confirmed_tx_id+", "+ optl_persisted__last_block_hash)
 
 
@@ -304,7 +323,7 @@ async function __givenOpenWallet_open_ws(
             // (but first check if it's the same one
             if (!opened_wallet_struct || was_connecting_for_wallet_w_addr !== opened_wallet_struct__address()) {
                 console.warn("Opened a WS conn but bailing before opening subscr because either wallet was closed or different wallet was opened")
-            } // ^-- note: this doesn't preclude a duplicate subscription being done for the same wallet on a fast close-then-open but the ws teardown on a close_wallet should handle that possibility wanyway
+            } // ^-- note: this doesn't preclude a duplicate subscription being done for the same wallet on a fast close-then-open but the ws teardown on a close_wallet should handle that possibility anyway
             //
             const payload = ws_client.new_subscribe_payload({
                 address: opened_wallet_struct__address(),
@@ -371,6 +390,17 @@ module.exports =
         if (!password) {
             return server._write_error(400, ".password required", res)
         }
+        //
+        let doc_exists = false
+        try {
+            doc_exists = await _does_file_exist_named(server.DocumentStore(), filename)
+        } catch (err) {
+            return server._write_error(500, err, res)
+        }
+        if (doc_exists) {
+            return server._write_error(400, "File with that name already exists", res)
+        }
+        //
         let lang_code
         try {
             lang_code = mnemonic_language_to_code(params.language)
@@ -384,16 +414,6 @@ module.exports =
             console.log(e)
             return
         }
-        let doc
-        try {
-            doc = await _read_wallet_json_for_file_named(server.DocumentStore(), filename, password)
-        } catch (err) {
-            return server._write_error(500, err, res)
-        }
-        if (doc != null) {
-            return server._write_error(400, "File with that name already exists", res)
-        }
-        // create the Wallet object with 'created' here, save it to the db, and set the instance as the 'open' one
         try {
             await _store_wallet_with(
                 server.DocumentStore(),
@@ -449,5 +469,141 @@ module.exports =
             return server._write_error(500, "Internal error opening wallet", res)
         }
         server._write_success(rpc_req_id, {/*intentionally empty*/}, res)
+    },
+    restore_deterministic_wallet: async function(rpc_req_id, params, server, res)
+    {
+        if (opened_wallet_struct != null) {
+            return server._write_error(400, "A wallet is already open - send close_wallet first", res)
+        }
+        const filename = params.filename
+        if (!filename) {
+            return server._write_error(400, ".filename required", res)
+        }
+        const password = params.password
+        if (!password) {
+            return server._write_error(400, ".password required", res)
+        }
+        const seed = params.seed
+        if (!seed) {
+            return server._write_error(400, ".seed required", res)
+        }
+        //
+        if (opened_wallet_struct != null) {
+            if (req.autosave_current == true) {
+                try {
+                    await __givenOpenWallet_write()
+                } catch (e) {
+                    return server._write_error(400, "Error saving existing given .autosave_current flag: " + e, res)
+                }
+            } else if (req.autosave_current != false) {
+                console.warn("Unrecognized .autosave_current of", autosave_current) // TODO? sufficient?
+            }
+        }
+
+        // TODO: add cryptonote_format_utils::decrypt_key functionality to bridge to implement params.seed_offset if necessary 
+        // if (!req.seed_offset.empty())
+        // {
+        //   recovery_key = cryptonote::decrypt_key(recovery_key, req.seed_offset);
+        // }
+          // crypto::secret_key decrypt_key(crypto::secret_key key, const epee::wipeable_string &passphrase);
+
+/*
+
+    bool was_deprecated_wallet = ((old_language == crypto::ElectrumWords::old_language_name) ||
+                                  crypto::ElectrumWords::get_is_old_style_seed(req.seed));
+
+    std::string mnemonic_language = old_language;
+    if (was_deprecated_wallet)
+    {
+      // The user had used an older version of the wallet with old style mnemonics.
+      res.was_deprecated = true;
+    }
+
+    if (old_language == crypto::ElectrumWords::old_language_name)
+    {
+      if (req.language.empty())
+      {
+        er.code = WALLET_RPC_ERROR_CODE_UNKNOWN_ERROR;
+        er.message = "Wallet was using the old seed language. You need to specify a new seed language.";
+        return false;
+      }
+      std::vector<std::string> language_list;
+      std::vector<std::string> language_list_en;
+      crypto::ElectrumWords::get_language_list(language_list);
+      crypto::ElectrumWords::get_language_list(language_list_en, true);
+      if (std::find(language_list.begin(), language_list.end(), req.language) == language_list.end() &&
+          std::find(language_list_en.begin(), language_list_en.end(), req.language) == language_list_en.end())
+      {
+        er.code = WALLET_RPC_ERROR_CODE_UNKNOWN_ERROR;
+        er.message = "Wallet was using the old seed language, and the specified new seed language is invalid.";
+        return false;
+      }
+      mnemonic_language = req.language;
+    }
+
+*/
+
+    // set blockheight if given
+    // try
+    // {
+    //   wal->set_refresh_from_block_height(req.restore_height);
+
+
+
+
+        let doc_exists = false
+        try {
+            doc_exists = await _does_file_exist_named(server.DocumentStore(), filename)
+        } catch (err) {
+            return server._write_error(500, err, res)
+        }
+        if (doc_exists) {
+            return server._write_error(400, "File with that name already exists", res)
+        }
+        //
+        let unpacked
+        try {
+            unpacked = (await mymonero_core.monero_utils_promise).seed_and_keys_from_mnemonic(seed, nettype)
+		} catch (e) {
+            console.log(e)
+            return server._write_error(500, e, res)
+		}
+        let derived_mnemonic
+        try {
+            derived_mnemonic = (await mymonero_core.monero_utils_promise).mnemonic_from_seed(
+                unpacked.sec_seed_string, 
+                unpacked.mnemonic_language
+            )
+        } catch (e) {
+            console.log(e)
+            return server._write_error(500, e, res)
+        }
+        if (derived_mnemonic != seed) {
+            return server._write_error(500, "Expected derived_mnemonic to equal req.seed", res)
+        }
+        try {
+            await _store_wallet_with(
+                server.DocumentStore(),
+                filename, password,
+                unpacked.address_string,
+                unpacked.sec_viewKey_string, unpacked.sec_spendKey_string,
+                derived_mnemonic/*which equals `seed`*/, unpacked.mnemonic_language
+            )
+        } catch (e) {
+            console.error(e)
+            return server._write_error(500, "Error saving wallet", res)
+        }
+        try {
+            await _open_wallet(server.DocumentStore(), filename, password) // this'll cause a login to occur via a WS conn open + subscr 
+        } catch (e) {
+            console.error(e)
+            return server._write_error(500, "Internal error opening created & saved wallet", res)
+        }
+        server._write_success(rpc_req_id, {
+            address: opened_wallet_struct__address(),
+            info: "Wallet has been restored successfully.",
+            seed: opened_wallet_struct__seed() // actually the mnemonic
+            // was_deprecated: false // TODO: implement this (see above)
+        }, res)
     }
 }

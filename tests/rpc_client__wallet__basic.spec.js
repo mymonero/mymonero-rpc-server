@@ -53,17 +53,12 @@ const filename0 = "mytestwallet"
 const password0 = "mytestpassword"
 const wallet_language = "English"
 //
-const addr1 = "43zxvpcj5Xv9SEkNXbMCG7LPQStHMpFCQCmkmR4u5nzjWwq5Xkv5VmGgYEsHXg4ja2FGRD5wMWbBVMijDTqmmVqm93wHGkg"
-const vk1 = "7bea1907940afdd480eff7c4bcadb478a0fbb626df9e3ed74ae801e18f53e104"
-const sk1 = "4e6d43cd03812b803c6f3206689f5fcc910005fc7e91d50d79b0776dbefcd803"
-const seedwords1 = "foxes selfish humid nexus juvenile dodge pepper ember biscuit elapse jazz vibrate biscuit"
-//
 const created_wallet_filename0 = filename0+"-"+(new Date()).getTime()
 //
 describe("RPC client tests - Wallet RPC - basic wallet functions", function()
 {
 	//
-	// I. creating, closing
+	// I. creating, closing, opening
 	it("can create_wallet", function(done)
 	{
 		this.timeout(20 * 1000);
@@ -135,12 +130,58 @@ describe("RPC client tests - Wallet RPC - basic wallet functions", function()
 			})
 		}, 1000) // give the server a sec to stabilize
 	})
-
-
-
 	//
-	// III. restoring
-
+	// II. restoring
+	it("can restore_deterministic_wallet", function(done)
+	{
+		this.timeout(20 * 1000);
+		//
+		const addr1 = "43zxvpcj5Xv9SEkNXbMCG7LPQStHMpFCQCmkmR4u5nzjWwq5Xkv5VmGgYEsHXg4ja2FGRD5wMWbBVMijDTqmmVqm93wHGkg"
+		const vk1 = "7bea1907940afdd480eff7c4bcadb478a0fbb626df9e3ed74ae801e18f53e104"
+		const sk1 = "4e6d43cd03812b803c6f3206689f5fcc910005fc7e91d50d79b0776dbefcd803"
+		const seedwords1 = "foxes selfish humid nexus juvenile dodge pepper ember biscuit elapse jazz vibrate biscuit"
+		// const wallet_language = "English"
+		//
+		let rpc_req_id = "t5"
+		let method = "restore_deterministic_wallet"
+		let params = {
+			filename: "restored_wallet"+"-"+(new Date()).getTime(), // so we don't get filename conflicts
+			password: password0,
+			seed: seedwords1,
+			restore_height: 0,
+			seed_offset: "",
+			autosave_current: true
+		}
+		_send_RPC_message(rpc_req_id, method, params, function(err, res_data) {
+			if (err) {
+				return done(err)
+			}
+			assert.equal(res_data.id, rpc_req_id)
+			const result = res_data.result
+			assert.equal(addr1, result.address)
+			assert.equal("Wallet has been restored successfully.", result.info)
+			assert.equal(seedwords1, result.seed)
+			// assert.equal(result.was_deprecated, false) // TODO
+			done()
+		})
+	})
+	it("can close restored wallet", function(done)
+	{
+		this.timeout(20 * 1000);
+		//
+		setTimeout(function() {
+			let rpc_req_id = "t6"
+			let method = "close_wallet"
+			let params = {}
+			_send_RPC_message(rpc_req_id, method, params, function(err, res_data) {
+				if (err) {
+					return done(err)
+				}
+				assert.equal(res_data.id, rpc_req_id)
+				done()
+			})
+		}, 4000); // give the WS server / client some time to sync up before closing the WS connection down
+	})
 });
 
 
