@@ -319,7 +319,6 @@ async function __givenOpenWallet_open_ws(
         console.log("Wallet was already closed before ws_client.connect() called")
         return
     }
-    opened_wallet_struct.ws_client = ws_client // storing the ws_client to close/free it later
     const was_connecting_for_wallet_w_addr = opened_wallet_struct.doc.address
     // ^- we can use this to check if the opened_wallet_struct at any future async point is still the same as the one we opened for in this scope
     function _connection_is_ready_for_subscribe(ws_feed_id)
@@ -329,14 +328,14 @@ async function __givenOpenWallet_open_ws(
         if (!opened_wallet_struct || was_connecting_for_wallet_w_addr !== opened_wallet_struct__address()) {
             console.warn("Opened a WS conn but bailing before opening subscr because either wallet was closed or different wallet was opened")
         } // ^-- note: this doesn't preclude a duplicate subscription being done for the same wallet on a fast close-then-open but the ws teardown on a close_wallet should handle that possibility anyway
-        //
-        const payload = ws_client.new_subscribe_payload({
-            address: opened_wallet_struct__address(),
-            view_key: opened_wallet_struct__view_key(),
-            // "since_confirmed_tx_id is handled internally in the client"
-        })
-        // const this__req_id = payload.req_id;
-        ws_client.send_payload__feed(ws_feed_id, payload)
+        ws_client.send_payload__feed(
+            ws_feed_id, 
+            ws_client.new_subscribe_payload({
+                address: opened_wallet_struct__address(),
+                view_key: opened_wallet_struct__view_key(),
+                // "since_confirmed_tx_id is handled internally in the client"
+            })
+        )
     }
     var ws_feed_id = cached_feed_ids_by_feed_channel[feed_channel] // is there one cached?
     console.log("cached ws_feed_id? ", ws_feed_id)
@@ -387,14 +386,19 @@ async function _close_wallet()
     }
     __is_closing_wallet = true
     {
-        if (opened_wallet_struct.ws_client) {
-            if (opened_wallet_struct.ws_feed_id) { // close any open WS conns for that wallet
-                opened_wallet_struct.ws_client.disconnect_feed(opened_wallet_struct.ws_feed_id)
-            } else {
-                console.warn("_close_wallet: non-nil ws_client but nil ws_feed_id")
+        if (opened_wallet_struct.ws_feed_id) { // close any open WS conns for that wallet
+            const address = opened_wallet_struct__address()
+            if (!address || typeof address == 'undefined') {
+                throw "Expected address"
             }
+            ws_client.send_payload__feed(
+                opened_wallet_struct.ws_feed_id, 
+                ws_client.new_unsubscribe_payload({ address: address })
+            )
+        } else {
+            console.warn("_close_wallet: non-nil ws_client but nil ws_feed_id")
         }
-        opened_wallet_struct.ws_client = null // not strictly necessary to do this
+        //
         opened_wallet_struct = null // free/release
     }
     __is_closing_wallet = false
