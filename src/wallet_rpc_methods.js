@@ -158,42 +158,12 @@ async function _open_wallet(store, filename, password)
     return doc
 }
 //
-const fetch = require('node-fetch')
-const _urlBase_REST = "https://api.mymonero.com:8443"
-function __REST_body_base(address, view_key)
-{
-    return {
-        // app_name: "Wallet RPC",
-        // app_version: 123,
-        address: address, 
-        view_key: view_key,
-    }
-}
-async function __REST_fetch_POST(path, body)
-{
-    return await fetch(`${_urlBase_REST}${path}`, {
-        method: 'POST', 
-        body: JSON.stringify(body),
-        headers: { 'Content-Type': 'application/json' }
-    })
-}
-async function _REST_login(address, view_key)
-{
-    const body = __REST_body_base(address, view_key)
-    body.create_account = true
-    //
-    let res = await __REST_fetch_POST("/login", body)
-    let json = await res.json()
-    console.log("/login Got JSON: ", json)
-    //
-    return json
-}
-//
 //
 const ws_wireformat = require('../mymonero-ws-client/ws/ws_wireformat')
 const WSErrorCode = ws_wireformat.WSErrorCode
 const WSTransport = require("../mymonero-ws-client/ws/ws_transport.real")
 const WSClient = require('../mymonero-ws-client/ws/ws_client')
+const WSFeedPool = require('../mymonero-ws-client/ws/ws_feed_pool')
 //
 const ws_transport = new WSTransport({
     ws_url_base: "ws://localhost:8888" /* 8888 is real, 8889 is debug */ // 'ws://api.mymonero.com:8091' // also the default for ws_transport.real.js
@@ -273,100 +243,67 @@ const ws_client = new WSClient({
 
     }
 })
-const cached_feed_ids_by_feed_channel = {}
-//
-var _cached_wstransports_by_feed_channel = {}
+const ws_feed_pool = new WSFeedPool({
+    ws_client: ws_client,
+    REST_url_base: "https://api.mymonero.com:8443",
+    fetch: require("node-fetch"),
+    a_ws_did_dc__fn: function(ws_feed_id) 
+    {
+        if (opened_wallet_struct) {
+            if (opened_wallet_struct.ws_feed_id != ws_feed_id) {
+                console.warn("A WS did disconnect - but the opened wallet has a different ws_feed_id ("+opened_wallet_struct.ws_feed_id+") than it ("+ws_feed_id+").")
+            } else {
+                opened_wallet_struct.ws_feed_id = null // since the feed did dc, we (must) know we don't have to publish an 'unsubscribe' in the imminent _close_wallet()
+            }
+            _close_wallet()
+        } else {
+            console.warn("A WS did disconnect but no wallet was open.")
+        }
+    }
+})
 //
 async function __givenOpenWallet_open_ws()
 {
     if (opened_wallet_struct == null) {
-        throw "Expected non-null opened_wallet_struct in __open_ws"
+        throw new Error("Expected non-null opened_wallet_struct in __open_ws")
     }
-
     // TODO: obtain last_confirmed_tx_id_by_addr, etc from ws_client's store on appropriate events and call __save_wallet_after_delay_unless_canceled
     // console.log("__givenOpenWallet_open_ws("+ optl_persisted__last_confirmed_tx_id+", "+ optl_persisted__last_confirmed_tx_id_by_addr, optl_persisted__last_confirmed_tx_block_hash_by_addr, optl_persisted__tx_hash_by_confirmed_tx_id_by_addr)
-
-
-    let login_res_json
+    let feed_channel
     try {
-        login_res_json = await _REST_login(
-            opened_wallet_struct.doc.address, 
-            opened_wallet_struct.doc.view_key
+        feed_channel = await ws_feed_pool.stepI__get_feed_channel(
+            opened_wallet_struct__address(), 
+            opened_wallet_struct__view_key()
         )
-    } catch (e) {
+    } catch(e) {
         console.error("/login error ('" + e + "') … closing wallet.")
         _close_wallet() // closing, first
         throw e // but also throwing so the error can be sent back to the client
-        return
     }
-    //
-    var feed_channel = login_res_json.feed_channel
-    if (!feed_channel || typeof feed_channel == 'undefined') {
-        console.warn("Server supplied no .feed_channel in /login res - using 'default'.")
-        feed_channel = "default" // in case the REST API doesn't support this, assume singular channel (this value itself doesn't matter)
-    }
-    // const new_address = login_res_json.new_address
-    // const start_height = login_res_json.start_height // TODO: save this locally?
     if (opened_wallet_struct == null) {
-        console.log("Wallet was already closed before ws_client.connect() called")
-        return
+        throw new Error("Wallet was already closed before ws_client.connect() called")
     }
     const was_connecting_for_wallet_w_addr = opened_wallet_struct.doc.address
     // ^- we can use this to check if the opened_wallet_struct at any future async point is still the same as the one we opened for in this scope
-    function _connection_is_ready_for_subscribe(ws_feed_id)
-    {
-        // Now that ws is open, we can subscribe for that wallet
-        // (but first check if it's the same one!)
-        if (!opened_wallet_struct || was_connecting_for_wallet_w_addr !== opened_wallet_struct__address()) {
-            console.warn("Opened a WS conn but bailing before opening subscr because either wallet was closed or different wallet was opened")
-        } // ^-- note: this doesn't preclude a duplicate subscription being done for the same wallet on a fast close-then-open but the ws teardown on a close_wallet should handle that possibility anyway
-        ws_client.send_payload__feed(
-            ws_feed_id, 
-            ws_client.new_subscribe_payload({
-                address: opened_wallet_struct__address(),
-                view_key: opened_wallet_struct__view_key(),
-                // "since_confirmed_tx_id is handled internally in the client"
-            })
-        )
-    }
-    //
-    var ws_feed_id = cached_feed_ids_by_feed_channel[feed_channel] // is there one cached?
-    if (typeof ws_feed_id == 'undefined' || !ws_feed_id) { // no existing ws_feed_id … call .connect() to obtain one
-        ws_feed_id = ws_client.connect( // overwrite the one which was null/undefined for later access
-            feed_channel, // obtained from /login; used in connection uri
-            function()
-            { 
-                _connection_is_ready_for_subscribe(ws_feed_id)
-            },
-            function(err)
-            { // ws_error_cb
-                delete cached_feed_ids_by_feed_channel[feed_channel] // clear this because there is no longer a usable feed_id! (Note: this should be incorporated into the ws_client interface if possible)
-                //
-                console.error("Error on ws_client.connect: '"+err+"'. Closing wallet.")
-                _close_wallet() // this will also take care of deleting opened_wallet_struct.ws_feed_id
-                //
-                if (err == null) {
-                    console.warn("Expected error not to be null")
-                }
-            },
-            function()
-            { // disconnected cb - may overlap with error 
-                delete cached_feed_ids_by_feed_channel[feed_channel] // clear this because there is no longer a usable feed_id! (Note: this should be incorporated into the ws_client interface if possible)
-            }
-        )
-        // TODO: would be nice to observe union of close events for the feed with that id
-        cached_feed_ids_by_feed_channel[feed_channel] = ws_feed_id // save back
-    } else {
-        _connection_is_ready_for_subscribe(ws_feed_id)
-    }
+    let ws_feed_id = ws_feed_pool.stepII__connect_with(
+        feed_channel, 
+        function(ws_feed_id)
+        { // when the connection is *actually* open
+            // Now that ws is open, we can subscribe for that wallet
+            // (but first check if it's the same one!)
+            if (!opened_wallet_struct || was_connecting_for_wallet_w_addr !== opened_wallet_struct__address()) {
+                console.warn("Opened a WS conn but bailing before opening subscr because either wallet was closed or different wallet was opened")
+            } // ^-- note: this doesn't preclude a duplicate subscription being done for the same wallet on a fast close-then-open but the ws teardown on a close_wallet should handle that possibility anyway
+            ws_feed_pool.submit_subscribe(ws_feed_id, opened_wallet_struct__address(), opened_wallet_struct__view_key())
+        }
+    )
     if (opened_wallet_struct == null) {
-        console.log("Wallet was already closed before setting .ws_feed_id")
-        return
+        throw new Error("Wallet was already closed before setting .ws_feed_id")
     }
-    opened_wallet_struct.ws_feed_id = ws_feed_id
+    opened_wallet_struct.ws_feed_id = ws_feed_id // this does not mean a connect() nor 'subscribe' was actually successful
 }
 let __is_closing_wallet = false
-async function _close_wallet()
+function _close_wallet()
 {
     if (opened_wallet_struct == null) {
         throw new Error("No wallet currently open")
@@ -383,12 +320,9 @@ async function _close_wallet()
                 throw "Expected address"
             }
             // NOTE: there is a chance that the opened_wallet_struct got a ws_feed_id but a subscribe was never issued (or it failed) … so the only reason why this works is because one wallet can be open at a time
-            ws_client.send_payload__feed(
-                opened_wallet_struct.ws_feed_id, 
-                ws_client.new_unsubscribe_payload({ address: address })
-            )
+            ws_feed_pool.submit_unsubscribe(opened_wallet_struct.ws_feed_id, opened_wallet_struct__address())
         } else {
-            console.warn("_close_wallet: non-nil ws_client but nil ws_feed_id")
+            console.warn("_close_wallet: nil ws_feed_id")
         }
         //
         opened_wallet_struct = null // free/release
