@@ -154,12 +154,7 @@ async function _open_wallet(store, filename, password)
         wallet_store: store, // hanging onto this here ... unclear if there's a better way than factoring much of this into a wallet class and passing the store to the wallet itself
         doc: doc
     }
-    let r = await __givenOpenWallet_open_ws(
-        // These can be stored for the purpose of later getting only the latest history from the ws
-        doc.last_confirmed_tx_id_by_addr,
-        doc.last_confirmed_tx_block_hash_by_addr,
-        doc.tx_hash_by_confirmed_tx_id_by_addr
-    )
+    let r = await __givenOpenWallet_open_ws()
     return doc
 }
 //
@@ -282,11 +277,8 @@ const cached_feed_ids_by_feed_channel = {}
 //
 var _cached_wstransports_by_feed_channel = {}
 //
-async function __givenOpenWallet_open_ws(
-    optl_persisted__last_confirmed_tx_id_by_addr,
-    optl_persisted__last_confirmed_tx_block_hash_by_addr,
-    optl_persisted__tx_hash_by_confirmed_tx_id_by_addr
-) {
+async function __givenOpenWallet_open_ws()
+{
     if (opened_wallet_struct == null) {
         throw "Expected non-null opened_wallet_struct in __open_ws"
     }
@@ -337,9 +329,8 @@ async function __givenOpenWallet_open_ws(
             })
         )
     }
+    //
     var ws_feed_id = cached_feed_ids_by_feed_channel[feed_channel] // is there one cached?
-    console.log("cached ws_feed_id? ", ws_feed_id)
-    console.log("feed_channel", feed_channel)
     if (typeof ws_feed_id == 'undefined' || !ws_feed_id) { // no existing ws_feed_id … call .connect() to obtain one
         ws_feed_id = ws_client.connect( // overwrite the one which was null/undefined for later access
             feed_channel, // obtained from /login; used in connection uri
@@ -391,6 +382,7 @@ async function _close_wallet()
             if (!address || typeof address == 'undefined') {
                 throw "Expected address"
             }
+            // NOTE: there is a chance that the opened_wallet_struct got a ws_feed_id but a subscribe was never issued (or it failed) … so the only reason why this works is because one wallet can be open at a time
             ws_client.send_payload__feed(
                 opened_wallet_struct.ws_feed_id, 
                 ws_client.new_unsubscribe_payload({ address: address })
