@@ -294,7 +294,12 @@ async function __givenOpenWallet_open_ws()
             if (!opened_wallet_struct || was_connecting_for_wallet_w_addr !== opened_wallet_struct__address()) {
                 console.warn("Opened a WS conn but bailing before opening subscr because either wallet was closed or different wallet was opened")
             } // ^-- note: this doesn't preclude a duplicate subscription being done for the same wallet on a fast close-then-open but the ws teardown on a close_wallet should handle that possibility anyway
-            ws_feed_pool.submit_subscribe(ws_feed_id, opened_wallet_struct__address(), opened_wallet_struct__view_key())
+            //
+            ws_client.send_payload__feed(ws_feed_id, ws_client.new_subscribe_payload({
+                address: opened_wallet_struct__address(),
+                view_key: opened_wallet_struct__view_key(),
+                // "since_confirmed_tx_id is handled internally in the client"
+            }))
         }
     )
     if (opened_wallet_struct == null) {
@@ -320,7 +325,10 @@ function _close_wallet()
                 throw "Expected address"
             }
             // NOTE: there is a chance that the opened_wallet_struct got a ws_feed_id but a subscribe was never issued (or it failed) … so the only reason why this works is because one wallet can be open at a time
-            ws_feed_pool.submit_unsubscribe(opened_wallet_struct.ws_feed_id, opened_wallet_struct__address())
+            ws_client.send_payload__feed(opened_wallet_struct.ws_feed_id, ws_client.new_unsubscribe_payload({
+                address: opened_wallet_struct__address()
+            }))
+    
         } else {
             console.warn("_close_wallet: nil ws_feed_id")
         }
