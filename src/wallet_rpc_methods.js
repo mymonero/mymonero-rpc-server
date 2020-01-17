@@ -156,10 +156,10 @@ async function _open_wallet(store, filename, password)
     }
     let r = await __givenOpenWallet_open_ws(
         // These can be stored for the purpose of later getting only the latest history from the ws
-        doc.last_confirmed_tx_id,
-        doc.last_block_hash
+        doc.last_confirmed_tx_id_by_addr,
+        doc.last_confirmed_tx_block_hash_by_addr,
+        doc.tx_hash_by_confirmed_tx_id_by_addr
     )
-    //
     return doc
 }
 //
@@ -189,9 +189,7 @@ async function _REST_login(address, view_key)
     //
     let res = await __REST_fetch_POST("/login", body)
     let json = await res.json()
-    console.log("/login Got JSON: ", json) 
-    //
-    // TODO: extract shard ID from this
+    console.log("/login Got JSON: ", json)
     //
     return json
 }
@@ -201,18 +199,100 @@ const ws_wireformat = require('../mymonero-ws-client/ws/ws_wireformat')
 const WSErrorCode = ws_wireformat.WSErrorCode
 const WSTransport = require("../mymonero-ws-client/ws/ws_transport.real")
 const WSClient = require('../mymonero-ws-client/ws/ws_client')
+//
+const ws_transport = new WSTransport({
+    ws_url_base: "ws://localhost:8888" /* 8888 is real, 8889 is debug */ // 'ws://api.mymonero.com:8091' // also the default for ws_transport.real.js
+})
+const ws_client = new WSClient({
+    ws_transport: ws_transport,
+    // TODO: save these before/as server shuts down and/or periodically - then read them for here (on launch)
+    // optl_persisted__last_confirmed_tx_id_by_addr: optl_persisted__last_confirmed_tx_id_by_addr,
+    // optl_persisted__last_confirmed_tx_block_hash_by_addr: optl_persisted__last_confirmed_tx_block_hash_by_addr,
+    // optl_persisted__tx_hash_by_confirmed_tx_id_by_addr: optl_persisted__tx_hash_by_confirmed_tx_id_by_addr,
+    //
+    block_info_cb: function(feed_id, block_height, block_hash, head_tx_id, per_byte_fee, fee_mask)
+    {
+        // lastReceived_block_height = block_height
+        console.log("block_info_cb" , feed_id, block_height, block_hash, head_tx_id, per_byte_fee, fee_mask)
+    },
+    subscr_initial_info_cb: function(feed_id, optl__req_id, expect_backlog_txs)
+    {
+        console.log("subscr_initial_info_cb" , feed_id, optl__req_id, expect_backlog_txs)
+    },
+    subscr_initial_backlog_txs_cb: function(feed_id, optl__req_id, tx)
+    {
+        // assert.notEqual(lastReceived_block_height, null);
 
+        //
+        // TODO: add tx to the list of txs ... unless it exists .. and maybe add it to a map for fast lookup? ... and call save
+        
+    },
+    subscr_initial_error_cb: function(feed_id, req_id, err_code, err_msg)
+    {
+        console.error("subscr_initial_error_cb!! err msg", err_code, err_msg)
+        // assert.equal(err_code, WSErrorCode.badRequest);
+        // assert.equal(err_msg, "Invalid field value for 'subaddress'");
+        //
+        // for now:
+        _close_wallet() // just close the *entire* wallet because this means there was a fatal 'connection' failure
+    },
+    unsubscribed_cb: function(feed_id, optl__req_id)
+    {
+    },
+    unsubscr_error_cb: function(feed_id, req_id, err_code, err_msg)
+    {
+        console.error("unsubscr_error_cb!! err msg", err_code, err_msg)
+        // assert.equal(err_code, WSErrorCode.badRequest);
+        // assert.equal(err_msg, "Invalid field value for 'subaddress'");
+        //
+        // TODO: close wallet here ? (are errors fatal?)
+    },
+    postinitial_tx_cb: function(feed_id, tx)
+    {
+
+        // TODO: add tx to the list of txs ... unless it exists .. and maybe add it to a map for fast lookup? .. and call save
+
+    },
+    anonymous_error_cb: function(feed_id, err_code, err_msg)
+    {
+        console.error("anonymous_error_cb!! err msg", err_code, err_msg)
+        // TODO: close wallet here ? (are all errors fatal?)
+    },
+    forget_txs_cb: function(feed_id, for_address, from_tx_id)
+    {
+    },
+    wallet_status_cb: function(feed_id, for_address, scan_block_height)
+    {
+        console.log("wallet_status_cb: ", feed_id, for_address, scan_block_height)
+    },
+    confirm_tx_cb: function(feed_id, tx_id, tx_hash, tx_height)
+    {
+
+        // TODO: confirm tx which ought to be within the existing store of txs  and call save
+
+    },
+    optl__store_did_forget_txs_cb: function(tx_ids)
+    {
+
+        // TODO: drop txs with those ids from the list and call save
+
+    }
+})
+const cached_feed_ids_by_feed_channel = {}
+//
+var _cached_wstransports_by_feed_channel = {}
 //
 async function __givenOpenWallet_open_ws(
-    optl_persisted__last_confirmed_tx_id,
-    optl_persisted__last_block_hash
+    optl_persisted__last_confirmed_tx_id_by_addr,
+    optl_persisted__last_confirmed_tx_block_hash_by_addr,
+    optl_persisted__tx_hash_by_confirmed_tx_id_by_addr
 ) {
     if (opened_wallet_struct == null) {
         throw "Expected non-null opened_wallet_struct in __open_ws"
     }
 
-    // TODO: obtain last_confirmed_tx_id and last_block_hash from ws_client's store on appropriate events and call __save_wallet_after_delay_unless_canceled
-    // console.log("__givenOpenWallet_open_ws("+ optl_persisted__last_confirmed_tx_id+", "+ optl_persisted__last_block_hash)
+    // TODO: obtain last_confirmed_tx_id_by_addr, etc from ws_client's store on appropriate events and call __save_wallet_after_delay_unless_canceled
+    // console.log("__givenOpenWallet_open_ws("+ optl_persisted__last_confirmed_tx_id+", "+ optl_persisted__last_confirmed_tx_id_by_addr, optl_persisted__last_confirmed_tx_block_hash_by_addr, optl_persisted__tx_hash_by_confirmed_tx_id_by_addr)
 
 
     let login_res_json
@@ -228,87 +308,13 @@ async function __givenOpenWallet_open_ws(
         return
     }
     //
-    const new_address = login_res_json.new_address
-    const start_height = login_res_json.start_height // TODO: save this locally?
-    //
-    const ws_url_base = "ws://localhost:8888" /* 8888 is real, 8889 is debug */ // 'ws://api.mymonero.com:8091' // also the default for ws_transport.real.js
-    //
-    // TODO: lazy create ws_transport by shard cookie sent back in login_res_json:
-    const ws_transport = new WSTransport({
-        ws_url_base: ws_url_base
-    })
-    const ws_client = new WSClient({
-        ws_transport: ws_transport,
-        optl_persisted__last_confirmed_tx_id: optl_persisted__last_confirmed_tx_id,
-        optl_persisted__last_block_hash: optl_persisted__last_block_hash,
-        block_info_cb: function(feed_id, block_height, block_hash, head_tx_id, per_byte_fee, fee_mask)
-        {
-            // lastReceived_block_height = block_height
-            console.log("block_info_cb" , feed_id, block_height, block_hash, head_tx_id, per_byte_fee, fee_mask)
-        },
-        subscr_initial_info_cb: function(feed_id, optl__req_id, expect_backlog_txs)
-        {
-            console.log("subscr_initial_info_cb" , feed_id, optl__req_id, expect_backlog_txs)
-        },
-        subscr_initial_backlog_txs_cb: function(feed_id, optl__req_id, tx)
-        {
-            // assert.notEqual(lastReceived_block_height, null);
-
-            //
-            // TODO: add tx to the list of txs ... unless it exists .. and maybe add it to a map for fast lookup? ... and call save
-            
-        },
-        subscr_initial_error_cb: function(feed_id, req_id, err_code, err_msg)
-        {
-            console.error("subscr_initial_error_cb!! err msg", err_code, err_msg)
-            // assert.equal(err_code, WSErrorCode.badRequest);
-            // assert.equal(err_msg, "Invalid field value for 'subaddress'");
-            //
-            // for now:
-            _close_wallet() // just close the *entire* wallet because this means there was a fatal 'connection' failure
-        },
-        unsubscribed_cb: function(feed_id, optl__req_id)
-        {
-        },
-        unsubscr_error_cb: function(feed_id, req_id, err_code, err_msg)
-        {
-            console.error("unsubscr_error_cb!! err msg", err_code, err_msg)
-            // assert.equal(err_code, WSErrorCode.badRequest);
-            // assert.equal(err_msg, "Invalid field value for 'subaddress'");
-            //
-            // TODO: close wallet here ? (are errors fatal?)
-        },
-        postinitial_tx_cb: function(feed_id, tx)
-        {
-
-            // TODO: add tx to the list of txs ... unless it exists .. and maybe add it to a map for fast lookup? .. and call save
-
-        },
-        anonymous_error_cb: function(feed_id, err_code, err_msg)
-        {
-            console.error("anonymous_error_cb!! err msg", err_code, err_msg)
-            // TODO: close wallet here ? (are all errors fatal?)
-        },
-        forget_txs_cb: function(feed_id, for_address, from_tx_id)
-        {
-        },
-        wallet_status_cb: function(feed_id, for_address, scan_block_height)
-        {
-            console.log("wallet_status_cb: ", feed_id, for_address, scan_block_height)
-        },
-        confirm_tx_cb: function(feed_id, tx_id, tx_hash, tx_height)
-        {
-
-            // TODO: confirm tx which ought to be within the existing store of txs  and call save
-
-        },
-        optl__store_did_forget_txs_cb: function(tx_ids)
-        {
-
-            // TODO: drop txs with those ids from the list and call save
-
-        }
-    })
+    var feed_channel = login_res_json.feed_channel
+    if (!feed_channel || typeof feed_channel == 'undefined') {
+        console.warn("Server supplied no .feed_channel in /login res - using 'default'.")
+        feed_channel = "default" // in case the REST API doesn't support this, assume singular channel (this value itself doesn't matter)
+    }
+    // const new_address = login_res_json.new_address
+    // const start_height = login_res_json.start_height // TODO: save this locally?
     if (opened_wallet_struct == null) {
         console.log("Wallet was already closed before ws_client.connect() called")
         return
@@ -316,33 +322,53 @@ async function __givenOpenWallet_open_ws(
     opened_wallet_struct.ws_client = ws_client // storing the ws_client to close/free it later
     const was_connecting_for_wallet_w_addr = opened_wallet_struct.doc.address
     // ^- we can use this to check if the opened_wallet_struct at any future async point is still the same as the one we opened for in this scope
-    const ws_feed_id = ws_client.connect(
-        function()
-        {   
-            // Now that ws is open, we can subscribe for that wallet
-            // (but first check if it's the same one
-            if (!opened_wallet_struct || was_connecting_for_wallet_w_addr !== opened_wallet_struct__address()) {
-                console.warn("Opened a WS conn but bailing before opening subscr because either wallet was closed or different wallet was opened")
-            } // ^-- note: this doesn't preclude a duplicate subscription being done for the same wallet on a fast close-then-open but the ws teardown on a close_wallet should handle that possibility anyway
-            //
-            const payload = ws_client.new_subscribe_payload({
-                address: opened_wallet_struct__address(),
-                view_key: opened_wallet_struct__view_key(),
-                // "since_confirmed_tx_id is handled internally in the client"
-            })
-            // const this__req_id = payload.req_id;
-            ws_client.send_payload__feed(ws_feed_id, payload)
-        },
-        function(err)
-        { // ws_error_cb
-            console.error("Error on ws_client.connect: '"+err+"'. Closing wallet.")
-            _close_wallet()
-            //
-            if (err == null) {
-                console.warn("Expected error not to be null")
+    function _connection_is_ready_for_subscribe(ws_feed_id)
+    {
+        // Now that ws is open, we can subscribe for that wallet
+        // (but first check if it's the same one!)
+        if (!opened_wallet_struct || was_connecting_for_wallet_w_addr !== opened_wallet_struct__address()) {
+            console.warn("Opened a WS conn but bailing before opening subscr because either wallet was closed or different wallet was opened")
+        } // ^-- note: this doesn't preclude a duplicate subscription being done for the same wallet on a fast close-then-open but the ws teardown on a close_wallet should handle that possibility anyway
+        //
+        const payload = ws_client.new_subscribe_payload({
+            address: opened_wallet_struct__address(),
+            view_key: opened_wallet_struct__view_key(),
+            // "since_confirmed_tx_id is handled internally in the client"
+        })
+        // const this__req_id = payload.req_id;
+        ws_client.send_payload__feed(ws_feed_id, payload)
+    }
+    var ws_feed_id = cached_feed_ids_by_feed_channel[feed_channel] // is there one cached?
+    console.log("cached ws_feed_id? ", ws_feed_id)
+    console.log("feed_channel", feed_channel)
+    if (typeof ws_feed_id == 'undefined' || !ws_feed_id) { // no existing ws_feed_id … call .connect() to obtain one
+        ws_feed_id = ws_client.connect( // overwrite the one which was null/undefined for later access
+            feed_channel, // obtained from /login; used in connection uri
+            function()
+            { 
+                _connection_is_ready_for_subscribe(ws_feed_id)
+            },
+            function(err)
+            { // ws_error_cb
+                delete cached_feed_ids_by_feed_channel[feed_channel] // clear this because there is no longer a usable feed_id! (Note: this should be incorporated into the ws_client interface if possible)
+                //
+                console.error("Error on ws_client.connect: '"+err+"'. Closing wallet.")
+                _close_wallet() // this will also take care of deleting opened_wallet_struct.ws_feed_id
+                //
+                if (err == null) {
+                    console.warn("Expected error not to be null")
+                }
+            },
+            function()
+            { // disconnected cb - may overlap with error 
+                delete cached_feed_ids_by_feed_channel[feed_channel] // clear this because there is no longer a usable feed_id! (Note: this should be incorporated into the ws_client interface if possible)
             }
-        }
-    )
+        )
+        // TODO: would be nice to observe union of close events for the feed with that id
+        cached_feed_ids_by_feed_channel[feed_channel] = ws_feed_id // save back
+    } else {
+        _connection_is_ready_for_subscribe(ws_feed_id)
+    }
     if (opened_wallet_struct == null) {
         console.log("Wallet was already closed before setting .ws_feed_id")
         return
