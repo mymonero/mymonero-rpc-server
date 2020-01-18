@@ -114,7 +114,6 @@ async function _store_wallet_with(
 var __wallet_timeout_til_save = null
 async function __givenOpenWallet_write()
 {
-    console.log("TODO: modify .doc  here to take ws_client.client_store's latest properties for this particular address")
     // TODO: modify .doc  here to take ws_client.client_store's latest properties for this particular address and save them 
     // .... and potentially do any checking of data consistency with transactions
 
@@ -263,6 +262,9 @@ function opened_wallet_struct__spend_key__sec()
 async function _open_wallet(store, filename, password)
 {
     let doc = await _read_wallet_json_for_file_named(store, filename, password)
+    if (doc == null) {
+        throw new Error("[_open_wallet] Doc with filename ("+filename+") doesn't exist")
+    }
     opened_wallet_struct = 
     {
         filename: filename,
@@ -494,8 +496,8 @@ module.exports =
         try {
             await _open_wallet(server.DocumentStore(), filename, password) // this'll cause a login to occur via a WS conn open + subscr 
         } catch (e) {
-            console.error(e)
-            return server._write_error(500, "Internal error opening created & saved wallet", res)
+            console.error("Returning 500:", e)
+            return server._write_error(500, "Internal error opening created & saved wallet:"+e, res)
         }
         server._write_success(rpc_req_id, {/*intentionally empty*/}, res)
     },
@@ -530,7 +532,7 @@ module.exports =
         try {
             await _open_wallet(server.DocumentStore(), filename, password) // this'll cause a login to occur via a WS conn open + subscr 
         } catch (e) {
-            console.error(e)
+            console.error("Returning 500:", e)
             return server._write_error(500, "Internal error opening wallet", res)
         }
         server._write_success(rpc_req_id, {/*intentionally empty*/}, res)
@@ -662,7 +664,7 @@ module.exports =
         try {
             await _open_wallet(server.DocumentStore(), filename, password) // this'll cause a login to occur via a WS conn open + subscr 
         } catch (e) {
-            console.error(e)
+            console.error("Returning 500:", e)
             return server._write_error(500, "Internal error opening created & saved wallet", res)
         }
         server._write_success(rpc_req_id, {

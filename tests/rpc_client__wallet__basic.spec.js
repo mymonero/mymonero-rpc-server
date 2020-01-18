@@ -187,7 +187,7 @@ describe("RPC client tests - Wallet RPC - basic wallet functions", function()
 	{
 		this.timeout(20 * 1000);
 		//
-		let rpc_req_id = "t3"
+		let rpc_req_id = "t7"
 		let method = "open_wallet"
 		let params = {
 			filename: deterministic_wallet_filename,
