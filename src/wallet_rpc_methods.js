@@ -87,20 +87,25 @@ async function _read_wallet_json_for_file_named(store, filename, password)
 }
 async function _write_wallet_json_for_file_named(store, filename, password, plain_doc)
 {
-    let plain_str = await cryptor.New_EncryptedBase64String__Promise(JSON.stringify(plain_doc), password)
-    await store.write(filename, plain_str)
+    let str = await cryptor.New_EncryptedBase64String__Promise(JSON.stringify(plain_doc), password)
+    await store.write(filename, str)
 }
 //
 async function _store_wallet_with(
     store,
     filename, password,
-    address, view_key, spend_key, mnemonic, mnemonic_language
+    address, 
+    view_key, spend_key, 
+    pub_spend_key, pub_view_key,
+    mnemonic, mnemonic_language
 ) {
     const plain_doc = 
     {
         address: address, 
         view_key: view_key, 
         spend_key: spend_key, 
+        pub_spend_key: pub_spend_key, 
+        pub_view_key: pub_view_key,
         mnemonic: mnemonic, 
         mnemonic_language: mnemonic_language
     }
@@ -109,12 +114,113 @@ async function _store_wallet_with(
 var __wallet_timeout_til_save = null
 async function __givenOpenWallet_write()
 {
+    console.log("TODO: modify .doc  here to take ws_client.client_store's latest properties for this particular address")
+    // TODO: modify .doc  here to take ws_client.client_store's latest properties for this particular address and save them 
+    // .... and potentially do any checking of data consistency with transactions
+
     return await _write_wallet_json_for_file_named(
         opened_wallet_struct.wallet_store, 
         opened_wallet_struct.filename, 
         opened_wallet_struct.password, 
         opened_wallet_struct.doc
     )
+}
+//
+const monero_txParsing_utils = require('../mymonero-ws-client/mymonero-core-js/monero_utils/monero_txParsing_utils')
+const monero_keyImage_cache_utils = require("../mymonero-ws-client/mymonero-core-js/monero_utils/monero_keyImage_cache_utils");
+//
+async function _got_tx(raw_tx)
+{
+    if (opened_wallet_struct == null) {
+        console.warn("[_got_tx] but no open wallet")
+        return
+    }
+    let address = opened_wallet_struct__address()
+    let keyImage_cache = monero_keyImage_cache_utils.Lazy_KeyImageCacheForWalletWith(address)
+    let tx_orNil = monero_txParsing_utils.ownedParsedTxFrom__orNil(
+        raw_tx,
+        address,
+        opened_wallet_struct__view_key__sec(),
+        opened_wallet_struct__spend_key__pub(),
+        opened_wallet_struct__spend_key__sec(),
+        keyImage_cache,
+        (await mymonero_core.monero_utils_promise)
+    )
+    if (tx_orNil == null) {
+        return // discard
+    }
+    __keep_parsed_tx(tx_orNil)
+}
+function __keep_parsed_tx(final_tx)
+{
+    if (opened_wallet_struct == null) {
+        throw "[__keep_parsed_tx] but no open wallet"
+    }
+    if (typeof opened_wallet_struct.doc.txs_by_hash == 'undefined' || !opened_wallet_struct.doc.txs_by_hash) {
+        opened_wallet_struct.doc.txs_by_hash = {}
+    }
+
+    if (typeof final_tx.id == 'undefined' || !final_tx.id) {
+        console.warn("=====>>>>>> [__keep_parsed_tx] final_tx.id is nil or undefined", final_tx)
+    }
+
+    opened_wallet_struct.doc.txs_by_hash[final_tx.hash] = final_tx
+    //
+    __save_wallet_after_delay_unless_canceled()
+}
+function _forget_txs_from(from_tx_id, for_address)
+{
+    if (opened_wallet_struct == null) {
+        throw "[_forget_txs_from] but no open wallet"
+    }
+    if (typeof opened_wallet_struct.doc.txs_by_hash == 'undefined' || !opened_wallet_struct.doc.txs_by_hash) {
+        opened_wallet_struct.doc.txs_by_hash = {}
+    } // ^---- just gonna set this up here even though it'll eventually get saved ... for the purpose of convenience in later code 
+    //
+    // Note: the deletion of txs must be per-address - cannot apply from_tx_id to some other addr
+    let from_tx_id__JSBigInt = new JSBigInt("" + from_tx_id) // from_tx_id should be a string, fwiw
+    let changed_any = false
+    const tx_hashes = Object.keys(opened_wallet_struct.doc.txs_by_hash)
+    for (var i = 0 ; i < tx_hashes.length ; i++) {
+        let tx_hash = tx_hashes[i]
+        let tx = opened_wallet_struct.doc.txs_by_hash[tx_hash]
+        if (typeof tx.id === 'undefined' || tx.id === null || tx.id === ''/*expected?*/) {
+            console.log("Skipping tx "+tx_hash+" bc it doesnt have an id")
+            continue // skip txs w/o id as they cannot be compared for 'forget'
+        }
+        let tx_id__JSBigInt = new JSBigInt("" + tx.id) // tx.id should be a JS number, fwiw - but this is future proofed for strings too
+        console.log(tx_id__JSBigInt+".subtract("+from_tx_id__JSBigInt+") ", tx_id__JSBigInt.subtract(from_tx_id__JSBigInt))
+        console.log(tx_id__JSBigInt+".subtract("+from_tx_id__JSBigInt+").compare(0) ", tx_id__JSBigInt.subtract(from_tx_id__JSBigInt).compare(0))
+        if (tx_id__JSBigInt.subtract(from_tx_id__JSBigInt).compare(0) <= 0) { // if the from_tx_id >= tx_id 
+            delete opened_wallet_struct.doc.txs_by_hash[tx_hash] // remove
+            changed_any
+        }
+    }
+    if (changed_any) {
+        __save_wallet_after_delay_unless_canceled()
+    }
+}
+function _confirm_tx(tx_id, tx_hash, tx_height, tx_block_hash)
+{
+    if (opened_wallet_struct == null) {
+        throw "[_confirm_tx] but no open wallet"
+    }
+    //
+    if (typeof opened_wallet_struct.doc.txs_by_hash == 'undefined' || !opened_wallet_struct.doc.txs_by_hash) {
+        opened_wallet_struct.doc.txs_by_hash = {}
+    } // ^---- just gonna set this up here even though it'll eventually get saved ... for the purpose of convenience in later code 
+    //
+    let expected_tx = opened_wallet_struct.doc.txs_by_hash[tx_hash]
+    if (typeof expected_tx == 'undefined' || !expected_tx) {
+        throw "[_confirm_tx] Expected tx for hash " + tx_hash
+    }
+    // fill in confirmation / block-inclusion info
+    expected_tx.id = tx_id
+    expected_tx.height = tx_height
+    expected_tx.block_hash = tx_block_hash
+    opened_wallet_struct.doc.txs_by_hash[tx_hash] = expected_tx
+    //
+    __save_wallet_after_delay_unless_canceled()
 }
 async function __save_wallet_after_delay_unless_canceled()
 {
@@ -124,7 +230,7 @@ async function __save_wallet_after_delay_unless_canceled()
     __wallet_timeout_til_save = setTimeout(async function()
     {
         if (opened_wallet_struct == null) {
-            console.warn("__save_wallet_after_delay_unless_canceled timeout called but no wallet currently open. Not calling _write_….")
+            console.warn("[__save_wallet_after_delay_unless_canceled] warning: __save_wallet_after_delay_unless_canceled timeout called but no wallet currently open. Not calling _write_….")
             return 
         }
         await __givenOpenWallet_write()
@@ -137,7 +243,7 @@ function opened_wallet_struct__address()
 {
     return opened_wallet_struct.doc.address
 }
-function opened_wallet_struct__view_key()
+function opened_wallet_struct__view_key__sec()
 {
     return opened_wallet_struct.doc.view_key
 }
@@ -145,10 +251,20 @@ function opened_wallet_struct__seed()
 {
     return opened_wallet_struct.doc.mnemonic
 }
+function opened_wallet_struct__spend_key__pub()
+{
+    return opened_wallet_struct.doc.pub_spend_key
+}
+function opened_wallet_struct__spend_key__sec()
+{
+    return opened_wallet_struct.doc.spend_key
+}
+
 async function _open_wallet(store, filename, password)
 {
     let doc = await _read_wallet_json_for_file_named(store, filename, password)
-    opened_wallet_struct = {
+    opened_wallet_struct = 
+    {
         filename: filename,
         password: password, // kept in mem for subsequent writes on receipt of a tx or other update
         wallet_store: store, // hanging onto this here ... unclear if there's a better way than factoring much of this into a wallet class and passing the store to the wallet itself
@@ -165,6 +281,7 @@ const WSTransport = require("../mymonero-ws-client/ws/ws_transport.real")
 const WSClient = require('../mymonero-ws-client/ws/ws_client')
 const WSFeedPool = require('../mymonero-ws-client/ws/ws_feed_pool')
 //
+//
 const ws_transport = new WSTransport({
     ws_url_base: "ws://localhost:8888" /* 8888 is real, 8889 is debug */ // 'ws://api.mymonero.com:8091' // also the default for ws_transport.real.js
 })
@@ -180,24 +297,15 @@ const ws_client = new WSClient({
         // lastReceived_block_height = block_height
         console.log("block_info_cb" , feed_id, block_height, block_hash, head_tx_id, per_byte_fee, fee_mask)
     },
-    subscr_initial_info_cb: function(feed_id, optl__req_id, expect_backlog_txs)
-    {
-        console.log("subscr_initial_info_cb" , feed_id, optl__req_id, expect_backlog_txs)
-    },
+    subscr_initial_info_cb: function(feed_id, optl__req_id, expect_backlog_txs) {},
     subscr_initial_backlog_txs_cb: function(feed_id, optl__req_id, tx)
     {
-        // assert.notEqual(lastReceived_block_height, null);
-
-        //
-        // TODO: add tx to the list of txs ... unless it exists .. and maybe add it to a map for fast lookup? ... and call save
-        
+        _got_tx(tx)
     },
     subscr_initial_error_cb: function(feed_id, req_id, err_code, err_msg)
     {
-        console.error("subscr_initial_error_cb!! err msg", err_code, err_msg)
+        console.error("subscr_initial_error_cb: err msg", err_code, err_msg)
         // assert.equal(err_code, WSErrorCode.badRequest);
-        // assert.equal(err_msg, "Invalid field value for 'subaddress'");
-        //
         // for now:
         _close_wallet() // just close the *entire* wallet because this means there was a fatal 'connection' failure
     },
@@ -206,42 +314,32 @@ const ws_client = new WSClient({
     },
     unsubscr_error_cb: function(feed_id, req_id, err_code, err_msg)
     {
-        console.error("unsubscr_error_cb!! err msg", err_code, err_msg)
-        // assert.equal(err_code, WSErrorCode.badRequest);
-        // assert.equal(err_msg, "Invalid field value for 'subaddress'");
-        //
-        // TODO: close wallet here ? (are errors fatal?)
+        console.error("unsubscr_error_cb: err msg", err_code, err_msg)
+        // wallet is probably already being closed if an unsubscr is happening
     },
     postinitial_tx_cb: function(feed_id, tx)
     {
-
-        // TODO: add tx to the list of txs ... unless it exists .. and maybe add it to a map for fast lookup? .. and call save
-
+        _got_tx(tx)
     },
     anonymous_error_cb: function(feed_id, err_code, err_msg)
     {
-        console.error("anonymous_error_cb!! err msg", err_code, err_msg)
-        // TODO: close wallet here ? (are all errors fatal?)
+        console.error("anonymous_error_cb: err msg", err_code, err_msg)
+        // TODO? close wallet here ? (are such errors fatal?)
     },
     forget_txs_cb: function(feed_id, for_address, from_tx_id)
     {
+        _forget_txs_from(from_tx_id, for_address)
     },
     wallet_status_cb: function(feed_id, for_address, scan_block_height)
     {
-        console.log("wallet_status_cb: ", feed_id, for_address, scan_block_height)
+        console.log("wallet_status_cb: ", for_address, "scan block height:", scan_block_height)
+        // TODO: where for_address is the same as the opened wallet, save scan_block_height to it here for query by endpoints
     },
-    confirm_tx_cb: function(feed_id, tx_id, tx_hash, tx_height)
+    confirm_tx_cb: function(feed_id, tx_id, tx_hash, tx_height, tx_block_hash)
     {
-
-        // TODO: confirm tx which ought to be within the existing store of txs  and call save
-
+        _confirm_tx(tx_id, tx_hash, tx_height, tx_block_hash)
     },
-    optl__store_did_forget_txs_cb: function(tx_ids)
-    {
-
-        // TODO: drop txs with those ids from the list and call save
-
-    }
+    optl__store_did_forget_txs_cb: function(tx_ids) {}
 })
 const ws_feed_pool = new WSFeedPool({
     ws_client: ws_client,
@@ -273,7 +371,7 @@ async function __givenOpenWallet_open_ws()
     try {
         feed_channel = await ws_feed_pool.stepI__get_feed_channel(
             opened_wallet_struct__address(), 
-            opened_wallet_struct__view_key()
+            opened_wallet_struct__view_key__sec()
         )
     } catch(e) {
         console.error("/login error ('" + e + "') … closing wallet.")
@@ -297,7 +395,7 @@ async function __givenOpenWallet_open_ws()
             //
             ws_client.send_payload__feed(ws_feed_id, ws_client.new_subscribe_payload({
                 address: opened_wallet_struct__address(),
-                view_key: opened_wallet_struct__view_key(),
+                view_key: opened_wallet_struct__view_key__sec(),
                 // "since_confirmed_tx_id is handled internally in the client"
             }))
         }
@@ -383,7 +481,10 @@ module.exports =
                 server.DocumentStore(),
                 filename, password,
                 created.address_string,
-                created.sec_viewKey_string, created.sec_spendKey_string,
+                created.sec_viewKey_string, 
+                created.sec_spendKey_string,
+                created.pub_spendKey_string,
+                created.pub_viewKey_string,
                 created.mnemonic_string, created.mnemonic_language
             )
         } catch (e) {
@@ -551,6 +652,7 @@ module.exports =
                 filename, password,
                 unpacked.address_string,
                 unpacked.sec_viewKey_string, unpacked.sec_spendKey_string,
+                unpacked.pub_spendKey_string, unpacked.pub_viewKey_string,
                 derived_mnemonic/*which equals `seed`*/, unpacked.mnemonic_language
             )
         } catch (e) {

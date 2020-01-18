@@ -44,7 +44,7 @@ function _send_RPC_message(rpc_req_id, method, params, fn)
 		fn(null, res.data)
 	}).catch(function(e) {
 		console.log("Error response from POST: ")
-		fn(new Error(""+e.response.data))
+		fn(new Error(""+e))
 	})
 }
 //
@@ -132,6 +132,7 @@ describe("RPC client tests - Wallet RPC - basic wallet functions", function()
 	})
 	//
 	// II. restoring
+	var deterministic_wallet_filename = "restored_wallet"+"-"+(new Date()).getTime() // so we don't get filename conflicts
 	it("can restore_deterministic_wallet", function(done)
 	{
 		this.timeout(20 * 1000);
@@ -145,7 +146,7 @@ describe("RPC client tests - Wallet RPC - basic wallet functions", function()
 		let rpc_req_id = "t5"
 		let method = "restore_deterministic_wallet"
 		let params = {
-			filename: "restored_wallet"+"-"+(new Date()).getTime(), // so we don't get filename conflicts
+			filename: deterministic_wallet_filename, 
 			password: password0,
 			seed: seedwords1,
 			restore_height: 0,
@@ -181,6 +182,24 @@ describe("RPC client tests - Wallet RPC - basic wallet functions", function()
 				done()
 			})
 		}, 4000); // give the WS server / client some time to sync up before closing the WS connection down
+	})
+	it("can reopen restored wallet for txs", function(done)
+	{
+		this.timeout(20 * 1000);
+		//
+		let rpc_req_id = "t3"
+		let method = "open_wallet"
+		let params = {
+			filename: deterministic_wallet_filename,
+			password: password0
+		}
+		_send_RPC_message(rpc_req_id, method, params, function(err, res_data) {
+			if (err) {
+				return done(err)
+			}
+			assert.equal(res_data.id, rpc_req_id)
+			done()
+		})
 	})
 });
 
