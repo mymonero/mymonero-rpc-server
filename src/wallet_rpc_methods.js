@@ -114,9 +114,12 @@ async function _store_wallet_with(
 var __wallet_timeout_til_save = null
 async function __givenOpenWallet_write()
 {
-    // TODO: modify .doc  here to take ws_client.client_store's latest properties for this particular address and save them 
-    // .... and potentially do any checking of data consistency with transactions
-
+    let addr = opened_wallet_struct__address()
+    opened_wallet_struct.doc.last_confirmed_tx_id = ws_client.last_confirmed_tx_id_for_addr__orNull(addr)
+    opened_wallet_struct.doc.last_confirmed_tx_block_hash = ws_client.last_confirmed_tx_block_hash_for_addr__orNull(addr)
+    opened_wallet_struct.doc.block_hash_by_confirmed_tx_id_by_addr = ws_client.block_hash_by_confirmed_tx_id_by_addr__orNull(addr)
+    //
+    // console.log("~> opened_wallet_struct.doc", opened_wallet_struct.doc)
     return await _write_wallet_json_for_file_named(
         opened_wallet_struct.wallet_store, 
         opened_wallet_struct.filename, 
@@ -272,7 +275,14 @@ async function _open_wallet(store, filename, password)
         wallet_store: store, // hanging onto this here ... unclear if there's a better way than factoring much of this into a wallet class and passing the store to the wallet itself
         doc: doc
     }
+    ws_client.populate_from_saved_wallet(
+		doc.address,
+		doc.last_confirmed_tx_id,
+		doc.last_confirmed_tx_block_hash,
+		doc.block_hash_by_confirmed_tx_id
+	) // after opening saved doc / prior to ws connection attempt    
     let r = await __givenOpenWallet_open_ws()
+    //
     return doc
 }
 //
@@ -282,7 +292,6 @@ const WSErrorCode = ws_wireformat.WSErrorCode
 const WSTransport = require("../mymonero-ws-client/ws/ws_transport.real")
 const WSClient = require('../mymonero-ws-client/ws/ws_client')
 const WSFeedPool = require('../mymonero-ws-client/ws/ws_feed_pool')
-//
 //
 const ws_transport = new WSTransport({
     ws_url_base: "ws://localhost:8888" /* 8888 is real, 8889 is debug */ // 'ws://api.mymonero.com:8091' // also the default for ws_transport.real.js

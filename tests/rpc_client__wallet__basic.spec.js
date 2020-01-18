@@ -39,6 +39,7 @@ function _send_RPC_message(rpc_req_id, method, params, fn)
 		jsonrpc: "2.0", id: rpc_req_id,
 		method: method, params: params
 	}
+	// TODO: use (node-)fetch for this ?
 	axios.post(rpc_server_url, payload).then(function(res) {
 		console.log("Got res data" , res.data)
 		fn(null, res.data)

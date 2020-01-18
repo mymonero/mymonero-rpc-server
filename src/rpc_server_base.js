@@ -89,6 +89,7 @@ class Server
     // Internal - Imperatives - 
     _write_error(code, msg, res)
     {
+        console.log("[rpc_server_base] Writring error", code, msg)
         res.writeHead(code, { 'Content-Type': 'text/plain' })
         res.write(msg) // TODO: does this need to be { jsonrpc, id, … }?
         res.end()
