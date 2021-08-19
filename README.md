@@ -1,3 +1,5 @@
+> :warning: This experimental project was never implemented.
+
 ## mymonero-rpc-server
 
 Implements a subset of the Monero RPC server APIs [1,2] by way of the MyMonero WebSocket API and mymonero-core.
